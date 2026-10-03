@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::{
     ActiveTheme, Disableable as _, Icon, Selectable as _, Sizable as _, h_flex, v_flex,
@@ -55,6 +55,8 @@ pub enum ToolbarEvent {
     Search(String),
     /// Collapse or expand the sidebar.
     ToggleSidebar,
+    /// Escape was pressed in the search field; give focus back to the app.
+    SearchEscape,
 }
 
 /// The toolbar view.
@@ -335,6 +337,12 @@ impl Render for Toolbar {
                 div()
                     .w(px(220.))
                     .min_w(px(100.))
+                    // Capture so the field still clears itself; we only
+                    // report that focus should leave it.
+                    .capture_action(cx.listener(|_, _: &Escape, _, cx| {
+                        cx.emit(ToolbarEvent::SearchEscape);
+                        cx.propagate();
+                    }))
                     .child(Input::new(&self.search).small().cleanable(true)),
             )
     }

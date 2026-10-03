@@ -295,6 +295,7 @@ impl AppView {
                 }
             }
             ToolbarEvent::ToggleSidebar => self.toggle_sidebar(cx),
+            ToolbarEvent::SearchEscape => self.focus.focus(window, cx),
             ToolbarEvent::Search(text) => {
                 self.filter.search.clone_from(text);
                 self.apply_query(window, cx);
