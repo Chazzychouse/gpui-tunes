@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded, unbounded};
-use rodio::stream::DeviceSinkBuilder;
+use rodio::stream::{DeviceSinkBuilder, MixerDeviceSink};
 use rodio::{Decoder, Source};
 
 /// Whether audio is flowing.
@@ -84,6 +84,9 @@ enum Command {
 }
 
 /// Cloneable handle to the audio thread.
+///
+/// Events are delivered to whichever clone calls `try_recv_event` first; use
+/// one consumer for events.
 #[derive(Clone)]
 pub struct Player {
     commands: Sender<Command>,
@@ -151,7 +154,12 @@ impl Player {
 
     /// Set the output volume, clamped to 0.0..=1.0.
     pub fn set_volume(&self, volume: f32) {
-        self.send(Command::SetVolume(volume.clamp(0.0, 1.0)));
+        let volume = if volume.is_nan() {
+            1.0
+        } else {
+            volume.clamp(0.0, 1.0)
+        };
+        self.send(Command::SetVolume(volume));
     }
 
     /// Stop and unload the current track.
@@ -199,6 +207,12 @@ fn open_source(path: &Path) -> Result<Loaded, String> {
     Ok((decoder, duration))
 }
 
+fn fresh_player(sink: &MixerDeviceSink, volume: f32) -> rodio::Player {
+    let player = rodio::Player::connect_new(sink.mixer());
+    player.set_volume(volume);
+    player
+}
+
 fn audio_thread(
     commands: &Receiver<Command>,
     events: &Sender<Event>,
@@ -207,44 +221,41 @@ fn audio_thread(
 ) {
     let sink = match DeviceSinkBuilder::open_default_sink() {
         Ok(sink) => sink,
-        Err(err) => {
-            let _ = ready.send(Err(PlayerError::Output(err.to_string())));
-            return;
-        }
+        Err(err) => return drop(ready.send(Err(PlayerError::Output(err.to_string())))),
     };
-    let player = rodio::Player::connect_new(sink.mixer());
+    let mut player = rodio::Player::connect_new(sink.mixer());
     let _ = ready.send(Ok(()));
 
-    let update = |f: &dyn Fn(&mut PlaybackStatus)| {
-        f(&mut status.lock().unwrap_or_else(PoisonError::into_inner));
-    };
     let mut state = PlaybackState::Stopped;
+    let mut volume = 1.0_f32;
+    let mut path: Option<PathBuf> = None;
+    let mut duration: Option<Duration> = None;
+    let mut last_error: Option<String> = None;
 
     loop {
+        let mut pending: Vec<Event> = Vec::new();
+
         match commands.recv_timeout(Duration::from_millis(100)) {
-            Ok(Command::Play(path)) => {
-                player.clear();
-                match open_source(&path) {
-                    Ok((source, duration)) => {
+            Ok(Command::Play(new_path)) => {
+                // A fresh player avoids `clear()`, which can race with a
+                // source ending naturally and skip the new track.
+                player = fresh_player(&sink, volume);
+                match open_source(&new_path) {
+                    Ok((source, total)) => {
                         player.append(source);
                         player.play();
                         state = PlaybackState::Playing;
-                        update(&|s| {
-                            s.path = Some(path.clone());
-                            s.duration = duration;
-                            s.position = Duration::ZERO;
-                            s.last_error = None;
-                        });
+                        path = Some(new_path);
+                        duration = total;
+                        last_error = None;
                     }
                     Err(message) => {
                         state = PlaybackState::Stopped;
                         tracing::warn!(%message, "could not play");
-                        update(&|s| {
-                            s.path = None;
-                            s.duration = None;
-                            s.last_error = Some(message.clone());
-                        });
-                        let _ = events.send(Event::Error(message));
+                        path = None;
+                        duration = None;
+                        last_error = Some(message.clone());
+                        pending.push(Event::Error(message));
                     }
                 }
             }
@@ -272,19 +283,23 @@ fn audio_thread(
                 PlaybackState::Stopped => {}
             },
             Ok(Command::Seek(position)) => {
-                if let Err(err) = player.try_seek(position) {
-                    let _ = events.send(Event::Error(format!("seek failed: {err}")));
+                // rodio queues a seek issued with nothing loaded and applies
+                // it to the next source, so only seek while a track is loaded.
+                if state != PlaybackState::Stopped
+                    && let Err(err) = player.try_seek(position)
+                {
+                    pending.push(Event::Error(format!("seek failed: {err}")));
                 }
             }
-            Ok(Command::SetVolume(volume)) => player.set_volume(volume),
+            Ok(Command::SetVolume(new_volume)) => {
+                volume = new_volume;
+                player.set_volume(volume);
+            }
             Ok(Command::Stop) => {
-                player.clear();
+                player = fresh_player(&sink, volume);
                 state = PlaybackState::Stopped;
-                update(&|s| {
-                    s.path = None;
-                    s.duration = None;
-                    s.position = Duration::ZERO;
-                });
+                path = None;
+                duration = None;
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
@@ -292,16 +307,26 @@ fn audio_thread(
 
         if state == PlaybackState::Playing && player.empty() {
             state = PlaybackState::Stopped;
-            let _ = events.send(Event::TrackEnded);
+            pending.push(Event::TrackEnded);
         }
 
-        let position = player.get_pos();
-        let volume = player.volume();
-        update(&|s| {
-            s.state = state;
-            s.position = position;
-            s.volume = volume;
-        });
+        let position = if state == PlaybackState::Stopped {
+            Duration::ZERO
+        } else {
+            player.get_pos()
+        };
+        *status.lock().unwrap_or_else(PoisonError::into_inner) = PlaybackStatus {
+            state,
+            path: path.clone(),
+            position,
+            duration,
+            volume,
+            last_error: last_error.clone(),
+        };
+
+        for event in pending {
+            let _ = events.send(event);
+        }
     }
 }
 
@@ -367,5 +392,57 @@ mod tests {
         }
         assert!(got_error);
         assert!(player.status().last_error.is_some());
+    }
+
+    #[test]
+    fn seek_while_stopped_is_ignored() {
+        let Ok(player) = Player::new() else {
+            return;
+        };
+        player.set_volume(0.0);
+        player.seek(Duration::from_millis(900));
+        player.play(&fixture());
+
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut observed = None;
+        while Instant::now() < deadline {
+            let status = player.status();
+            if status.state == PlaybackState::Playing {
+                observed = Some(status.position);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let position = observed.expect("never observed Playing within 500ms");
+        assert!(
+            position < Duration::from_millis(300),
+            "pending seek was applied: position {position:?}"
+        );
+    }
+
+    #[test]
+    fn stop_resets_status() {
+        let Ok(player) = Player::new() else {
+            return;
+        };
+        player.set_volume(0.0);
+        player.play(&fixture());
+        wait_for(&player, PlaybackState::Playing, Duration::from_secs(2));
+        player.stop();
+        wait_for(&player, PlaybackState::Stopped, Duration::from_secs(1));
+        let status = player.status();
+        assert!(status.path.is_none());
+        assert_eq!(status.position, Duration::ZERO);
+    }
+
+    fn wait_for(player: &Player, want: PlaybackState, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if player.status().state == want {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("state {want:?} not reached within {timeout:?}");
     }
 }
