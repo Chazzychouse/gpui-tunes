@@ -159,6 +159,13 @@ impl Toolbar {
             .model
             .duration
             .map_or_else(|| "--:--".into(), fmt_duration);
+        // One secondary line beside the title/seek column: a notice replaces
+        // the artist/album line so the fixed-height panel never grows a row.
+        let second_line = match &self.model.notice {
+            Some(notice) => Some((notice.clone(), cx.theme().danger)),
+            None if has_track => Some((self.model.artist.clone(), muted)),
+            None => None,
+        };
 
         h_flex()
             .flex_1()
@@ -202,18 +209,18 @@ impl Toolbar {
                             .child(fmt_duration(self.model.position))
                             .child(Slider::new(&self.seek).disabled(!has_track).flex_1())
                             .child(total),
-                    )
-                    .when_some(self.model.notice.clone(), |el, notice| {
-                        el.child(div().text_xs().text_color(cx.theme().danger).child(notice))
-                    }),
+                    ),
             )
-            .when(has_track, |el| {
+            .when_some(second_line, |el, (text, color)| {
                 el.child(
                     div()
-                        .text_xs()
-                        .text_color(muted)
+                        .max_w(px(260.))
+                        .overflow_hidden()
                         .whitespace_nowrap()
-                        .child(self.model.artist.clone()),
+                        .text_ellipsis()
+                        .text_xs()
+                        .text_color(color)
+                        .child(text),
                 )
             })
     }
@@ -259,7 +266,11 @@ impl Render for Toolbar {
                     .items_center()
                     .w(px(140.))
                     .child(Icon::new(IconName::Volume2).small())
-                    .child(Slider::new(&self.volume).flex_1()),
+                    .child(
+                        Slider::new(&self.volume)
+                            .disabled(!self.model.enabled)
+                            .flex_1(),
+                    ),
             )
             .child(self.now_playing(cx))
             .child(

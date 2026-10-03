@@ -378,6 +378,7 @@ mod tests {
     #[test]
     fn missing_file_reports_error_event() {
         let Ok(player) = Player::new() else {
+            eprintln!("no audio device; skipping player test");
             return;
         };
         player.play(Path::new("/nonexistent/file.mp3"));
@@ -397,6 +398,7 @@ mod tests {
     #[test]
     fn seek_while_stopped_is_ignored() {
         let Ok(player) = Player::new() else {
+            eprintln!("no audio device; skipping player test");
             return;
         };
         player.set_volume(0.0);
@@ -418,11 +420,27 @@ mod tests {
             position < Duration::from_millis(300),
             "pending seek was applied: position {position:?}"
         );
+
+        // The fixture is ~1 s long. A stale 900 ms seek applied late would
+        // push the position past 600 ms or end the track by now.
+        std::thread::sleep(Duration::from_millis(250));
+        let status = player.status();
+        assert_eq!(
+            status.state,
+            PlaybackState::Playing,
+            "playback stopped 250ms after starting; a stale seek likely ended the track"
+        );
+        assert!(
+            status.position < Duration::from_millis(600),
+            "pending seek was applied late: position {:?}",
+            status.position
+        );
     }
 
     #[test]
     fn stop_resets_status() {
         let Ok(player) = Player::new() else {
+            eprintln!("no audio device; skipping player test");
             return;
         };
         player.set_volume(0.0);

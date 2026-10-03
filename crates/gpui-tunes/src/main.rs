@@ -11,10 +11,12 @@ use gpui_kit::*;
 use crate::ui::app::AppView;
 
 fn library_root() -> PathBuf {
-    std::env::var_os("GPUI_TUNES_LIBRARY").map_or_else(
-        || dirs::home_dir().unwrap_or_default().join("music/library"),
-        PathBuf::from,
-    )
+    std::env::var_os("GPUI_TUNES_LIBRARY")
+        .filter(|v| !v.is_empty())
+        .map_or_else(
+            || dirs::home_dir().unwrap_or_default().join("music/library"),
+            PathBuf::from,
+        )
 }
 
 fn main() {

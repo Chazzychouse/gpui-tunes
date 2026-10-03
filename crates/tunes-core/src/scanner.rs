@@ -9,7 +9,10 @@ use walkdir::WalkDir;
 use crate::track::{Track, TrackId, UNKNOWN_ALBUM, UNKNOWN_ARTIST, UNKNOWN_GENRE};
 
 /// File extensions the scanner accepts, lower case.
-const EXTENSIONS: &[&str] = &["m4a", "mp3", "wav", "flac", "ogg", "opus", "aac"];
+///
+/// No `opus`: rodio 0.22 has no Opus decoder, so listing those files would
+/// only produce playback errors.
+const EXTENSIONS: &[&str] = &["m4a", "mp3", "wav", "flac", "ogg", "aac"];
 
 /// Errors that abort a scan. Per-file failures never abort; they are logged.
 #[derive(Debug, thiserror::Error)]
@@ -30,7 +33,13 @@ pub fn scan(root: &Path) -> Result<Vec<Track>, ScanError> {
 
     let mut paths: Vec<PathBuf> = WalkDir::new(root)
         .into_iter()
-        .filter_map(Result::ok)
+        .filter_map(|entry| match entry {
+            Ok(entry) => Some(entry),
+            Err(err) => {
+                tracing::warn!(%err, "skipping unreadable directory entry");
+                None
+            }
+        })
         .filter(|entry| entry.file_type().is_file())
         .map(walkdir::DirEntry::into_path)
         .filter(|path| is_audio(path))

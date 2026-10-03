@@ -177,12 +177,13 @@ impl AppView {
         let Some(track) = library.track(id) else {
             return;
         };
-        if let Ok(player) = &self.player {
-            player.play(&track.path);
-            // Optimistic: the status snapshot lags up to one tick, and a
-            // play/pause press in between must toggle, not restart.
-            self.status.state = PlaybackState::Playing;
-        }
+        let Ok(player) = &self.player else {
+            return;
+        };
+        player.play(&track.path);
+        // Optimistic: the status snapshot lags up to one tick, and a
+        // play/pause press in between must toggle, not restart.
+        self.status.state = PlaybackState::Playing;
         // `id` always comes from `rows`, which the table observer keeps in sync
         // with the queue, so it is always present.
         self.queue.jump_to(id);
@@ -238,14 +239,23 @@ impl AppView {
             self.push_toolbar_model(window, cx);
             return;
         };
-        self.status = player.status();
+        // Drain first, then read status: the audio thread publishes status
+        // before sending events, so a fresh read after draining is
+        // authoritative. If the user started another track after a queued
+        // event was sent, that newer Play makes the state non-Stopped and the
+        // stale event is ignored instead of skipping the user's choice.
         let mut events = Vec::new();
         while let Some(event) = player.try_recv_event() {
             events.push(event);
         }
+        self.status = player.status();
         for event in events {
             match event {
-                Event::TrackEnded => self.step(true, window, cx),
+                Event::TrackEnded => {
+                    if self.status.state == PlaybackState::Stopped {
+                        self.step(true, window, cx);
+                    }
+                }
                 Event::Error(message) => {
                     self.notice = Some((message, Instant::now()));
                     // Skip past a broken file once; `play_track` clears the
