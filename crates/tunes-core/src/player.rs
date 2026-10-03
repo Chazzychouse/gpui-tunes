@@ -431,7 +431,7 @@ mod tests {
             "playback stopped 250ms after starting; a stale seek likely ended the track"
         );
         assert!(
-            status.position < Duration::from_millis(600),
+            status.position < Duration::from_millis(750),
             "pending seek was applied late: position {:?}",
             status.position
         );

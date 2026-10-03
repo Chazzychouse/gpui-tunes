@@ -54,7 +54,7 @@ Public modules:
 
 **`scanner`**
 - `pub fn scan(root: &Path) -> Result<Vec<Track>, ScanError>`.
-- Walks recursively, accepts extensions `m4a mp3 wav flac ogg opus aac`, reads tags
+- Walks recursively, accepts extensions `m4a mp3 wav flac ogg aac` (Opus is excluded: rodio has no decoder for it), reads tags
   with lofty. A file that fails to parse is skipped and reported through
   `tracing::warn!`; it never aborts the scan. Returns `ScanError::RootMissing` only
   when the root does not exist.

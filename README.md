@@ -19,7 +19,7 @@ Scans `~/music/library` at startup. Override with:
 
     GPUI_TUNES_LIBRARY=/path/to/music cargo run --release
 
-Supported formats: M4A (AAC), MP3, WAV, FLAC, OGG Vorbis. Opus and ALAC are not decodable by rodio and are not scanned.
+Supported formats: M4A (AAC), MP3, WAV, FLAC, OGG Vorbis. Opus files are not scanned; ALAC (.m4a) and Opus-in-.ogg files are listed but cannot be played and are skipped.
 
 ## Layout
 
