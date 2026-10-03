@@ -4,8 +4,10 @@
 //! the plain structs it returns.
 #![deny(missing_docs)]
 
+pub mod library;
 pub mod scanner;
 pub mod track;
 
+pub use library::{Filter, Library, Sort, SortColumn};
 pub use scanner::{ScanError, scan};
 pub use track::{Track, TrackId, UNKNOWN_ALBUM, UNKNOWN_ARTIST, UNKNOWN_GENRE};
