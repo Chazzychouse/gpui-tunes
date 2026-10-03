@@ -44,6 +44,8 @@ impl Queue {
     }
 
     /// Advance, wrapping at the end. Starts at the front when there is no cursor.
+    // Not an iterator: the cursor wraps and the queue is navigated in both directions.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<TrackId> {
         if self.order.is_empty() {
             return None;
@@ -53,6 +55,8 @@ impl Queue {
     }
 
     /// Step back, wrapping at the front. Starts at the end when there is no cursor.
+    // Not an iterator: the cursor wraps and the queue is navigated in both directions.
+    #[allow(clippy::should_implement_trait)]
     pub fn prev(&mut self) -> Option<TrackId> {
         if self.order.is_empty() {
             return None;
