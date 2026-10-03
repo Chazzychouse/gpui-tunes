@@ -1,20 +1,20 @@
 //! gpui-tunes binary entry point.
 
-use gpui_kit::component::{ActiveTheme, Theme, ThemeMode, TitleBar, v_flex};
+mod ui;
+
+use std::path::PathBuf;
+
+use gpui_kit::component::{Theme, ThemeMode};
 #[allow(clippy::wildcard_imports)] // gpui_kit re-exports the gpui prelude
 use gpui_kit::*;
 
-struct Hello;
+use crate::ui::app::AppView;
 
-impl Render for Hello {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child(TitleBar::new())
-            .child(div().p_4().child("gpui-tunes"))
-    }
+fn library_root() -> PathBuf {
+    std::env::var_os("GPUI_TUNES_LIBRARY").map_or_else(
+        || dirs::home_dir().unwrap_or_default().join("music/library"),
+        PathBuf::from,
+    )
 }
 
 fn main() {
@@ -24,7 +24,9 @@ fn main() {
         )
         .init();
 
-    gpui_kit::application().run(|cx| {
+    let root = library_root();
+
+    gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
         Theme::change(ThemeMode::Dark, None, cx);
 
@@ -41,7 +43,9 @@ fn main() {
             ..Default::default()
         };
 
-        gpui_kit::open_window(options, cx, |_, cx| cx.new(|_| Hello))
-            .expect("failed to open window");
+        gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| AppView::new(root.clone(), window, cx))
+        })
+        .expect("failed to open window");
     });
 }
