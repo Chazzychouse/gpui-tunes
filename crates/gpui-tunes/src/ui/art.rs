@@ -5,6 +5,7 @@ use std::sync::Arc;
 use gpui_kit::{Image, ImageFormat};
 
 /// Wrap encoded picture bytes for `img()`. Format is sniffed from magic bytes.
+#[allow(dead_code)] // consumed by the now-playing artwork view in a later task
 pub fn decode(bytes: &[u8]) -> Arc<Image> {
     let format = match bytes {
         [0x89, b'P', b'N', b'G', ..] => ImageFormat::Png,
