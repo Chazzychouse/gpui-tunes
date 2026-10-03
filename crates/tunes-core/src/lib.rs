@@ -5,11 +5,13 @@
 #![deny(missing_docs)]
 
 pub mod library;
+pub mod player;
 pub mod queue;
 pub mod scanner;
 pub mod track;
 
 pub use library::{Filter, Library, Sort, SortColumn};
+pub use player::{Event, PlaybackState, PlaybackStatus, Player, PlayerError};
 pub use queue::Queue;
 pub use scanner::{ScanError, scan};
 pub use track::{Track, TrackId, UNKNOWN_ALBUM, UNKNOWN_ARTIST, UNKNOWN_GENRE};
