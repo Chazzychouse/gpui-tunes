@@ -166,16 +166,32 @@ impl Library {
     }
 
     /// Raw bytes of the embedded front cover, read lazily and memoized.
+    ///
+    /// Only successful reads are cached; a failed read is not cached and is
+    /// retried on the next call.
     pub fn cover_art(&self, id: TrackId) -> Option<Arc<[u8]>> {
         let track = self.track(id)?;
         if !track.has_art {
             return None;
         }
-        let mut cache = self
+        if let Some(hit) = self.cached_art(id) {
+            return Some(hit);
+        }
+        // No lock is held during the file read; a racing duplicate read is acceptable.
+        let bytes = read_art(track)?;
+        self.art_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id, Some(Arc::clone(&bytes)));
+        Some(bytes)
+    }
+
+    fn cached_art(&self, id: TrackId) -> Option<Arc<[u8]>> {
+        let cache = self
             .art_cache
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        cache.entry(id).or_insert_with(|| read_art(track)).clone()
+        cache.get(&id).cloned().flatten()
     }
 }
 
@@ -196,6 +212,7 @@ fn matches_search(track: &Track, needle: &str) -> bool {
 
 fn unique_sorted<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
     let mut out: Vec<String> = values.map(str::to_owned).collect();
+    // Equal case-folded names: `b.cmp(a)` orders lowercase before uppercase, keeping order deterministic.
     out.sort_by(|a, b| ci(a, b).then_with(|| b.cmp(a)));
     out.dedup();
     out
