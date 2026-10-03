@@ -4,5 +4,7 @@
 
 pub mod app;
 pub mod art;
+pub mod browser;
 pub mod format;
 pub mod section;
+pub mod sidebar;

@@ -26,26 +26,28 @@ fn main() {
 
     let root = library_root();
 
-    gpui_kit::application().run(move |cx| {
-        gpui_kit::init(cx);
-        Theme::change(ThemeMode::Dark, None, cx);
+    gpui_kit::application()
+        .with_assets(gpui_kit::assets::AllAssets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+            Theme::change(ThemeMode::Dark, None, cx);
 
-        let options = WindowOptions {
-            titlebar: Some(TitlebarOptions {
-                title: Some("gpui-tunes".into()),
+            let options = WindowOptions {
+                titlebar: Some(TitlebarOptions {
+                    title: Some("gpui-tunes".into()),
+                    ..Default::default()
+                }),
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(1200.), px(760.)),
+                    cx,
+                ))),
                 ..Default::default()
-            }),
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(1200.), px(760.)),
-                cx,
-            ))),
-            ..Default::default()
-        };
+            };
 
-        gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| AppView::new(root.clone(), window, cx))
-        })
-        .expect("failed to open window");
-    });
+            gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| AppView::new(root.clone(), window, cx))
+            })
+            .expect("failed to open window");
+        });
 }
