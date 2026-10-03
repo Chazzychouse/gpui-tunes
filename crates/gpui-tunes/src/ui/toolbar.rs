@@ -159,8 +159,8 @@ impl Toolbar {
             .model
             .duration
             .map_or_else(|| "--:--".into(), fmt_duration);
-        // One secondary line beside the title/seek column: a notice replaces
-        // the artist/album line so the fixed-height panel never grows a row.
+        // One secondary line under the seek row: a notice replaces the
+        // artist/album line so the panel never grows a fourth row.
         let second_line = match &self.model.notice {
             Some(notice) => Some((notice.clone(), cx.theme().danger)),
             None if has_track => Some((self.model.artist.clone(), muted)),
@@ -171,7 +171,8 @@ impl Toolbar {
             .flex_1()
             // Keep room for title + seek bar; the search box gives way first.
             .min_w(px(220.))
-            .h(px(52.))
+            .min_h(px(52.))
+            .py_1()
             .gap_3()
             .px_3()
             .rounded(cx.theme().radius)
@@ -193,36 +194,55 @@ impl Toolbar {
                 v_flex()
                     .flex_1()
                     .min_w_0()
-                    .child(div().text_sm().whitespace_nowrap().overflow_hidden().child(
-                        if has_track {
-                            self.model.title.clone()
-                        } else {
-                            "Not Playing".into()
-                        },
-                    ))
+                    .justify_center()
+                    .child(
+                        div()
+                            .text_sm()
+                            .line_height(relative(1.2))
+                            .whitespace_nowrap()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(if has_track {
+                                self.model.title.clone()
+                            } else {
+                                "Not Playing".into()
+                            }),
+                    )
                     .child(
                         h_flex()
+                            .w_full()
                             .gap_2()
                             .items_center()
                             .text_xs()
+                            .line_height(relative(1.2))
                             .text_color(muted)
-                            .child(fmt_duration(self.model.position))
-                            .child(Slider::new(&self.seek).disabled(!has_track).flex_1())
-                            .child(total),
-                    ),
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .whitespace_nowrap()
+                                    .child(fmt_duration(self.model.position)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(60.))
+                                    .child(Slider::new(&self.seek).disabled(!has_track)),
+                            )
+                            .child(div().flex_shrink_0().whitespace_nowrap().child(total)),
+                    )
+                    .when_some(second_line, |el, (text, color)| {
+                        el.child(
+                            div()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis()
+                                .text_xs()
+                                .line_height(relative(1.2))
+                                .text_color(color)
+                                .child(text),
+                        )
+                    }),
             )
-            .when_some(second_line, |el, (text, color)| {
-                el.child(
-                    div()
-                        .max_w(px(260.))
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .text_xs()
-                        .text_color(color)
-                        .child(text),
-                )
-            })
     }
 }
 
@@ -235,7 +255,7 @@ impl Render for Toolbar {
 
         h_flex()
             .w_full()
-            .h(px(72.))
+            .h(px(76.))
             .px_3()
             .gap_4()
             .items_center()
