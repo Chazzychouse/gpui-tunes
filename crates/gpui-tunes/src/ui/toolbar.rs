@@ -20,7 +20,7 @@ use crate::ui::format::fmt_duration;
 pub struct ToolbarModel {
     /// Current track title, empty when nothing is loaded.
     pub title: String,
-    /// Current track artist.
+    /// Artist and album line shown under the title.
     pub artist: String,
     /// Elapsed time.
     pub position: Duration,

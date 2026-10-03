@@ -40,7 +40,7 @@ pub struct AppView {
     toolbar: Entity<Toolbar>,
     status: PlaybackStatus,
     now_playing: Option<TrackId>,
-    art_cache: Option<(TrackId, Arc<Image>)>,
+    art_cache: Option<(TrackId, Option<Arc<Image>>)>,
     notice: Option<(String, Instant)>,
     /// Set after a decode error auto-advanced once; cleared by every
     /// `play_track`, so a run of broken files stops after one skip.
@@ -179,6 +179,9 @@ impl AppView {
         };
         if let Ok(player) = &self.player {
             player.play(&track.path);
+            // Optimistic: the status snapshot lags up to one tick, and a
+            // play/pause press in between must toggle, not restart.
+            self.status.state = PlaybackState::Playing;
         }
         // `id` always comes from `rows`, which the table observer keeps in sync
         // with the queue, so it is always present.
@@ -247,7 +250,8 @@ impl AppView {
                     self.notice = Some((message, Instant::now()));
                     // Skip past a broken file once; `play_track` clears the
                     // flag, so re-arm it after stepping.
-                    if !self.auto_skipped {
+                    // Non-fatal errors (seek) leave playback running: don't skip.
+                    if !self.auto_skipped && self.status.state == PlaybackState::Stopped {
                         self.step(true, window, cx);
                         self.auto_skipped = true;
                     }
@@ -308,13 +312,10 @@ impl AppView {
                 .as_ref()
                 .is_none_or(|(cached, _)| *cached != id)
             {
-                self.art_cache = library.cover_art(id).map(|bytes| (id, art::decode(&bytes)));
+                let img = library.cover_art(id).map(|bytes| art::decode(&bytes));
+                self.art_cache = Some((id, img));
             }
-            model.art = self
-                .art_cache
-                .as_ref()
-                .filter(|(cached, _)| *cached == id)
-                .map(|(_, img)| Arc::clone(img));
+            model.art = self.art_cache.as_ref().and_then(|(_, img)| img.clone());
         }
         self.toolbar
             .update(cx, |t, cx| t.set_model(model, window, cx));
