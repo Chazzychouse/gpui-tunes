@@ -7,7 +7,9 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
-use gpui_kit::component::{ActiveTheme, Disableable as _, Icon, Sizable as _, h_flex, v_flex};
+use gpui_kit::component::{
+    ActiveTheme, Disableable as _, Icon, Selectable as _, Sizable as _, h_flex, v_flex,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 #[allow(clippy::wildcard_imports)] // gpui_kit re-exports the gpui prelude
 use gpui_kit::*;
@@ -51,6 +53,8 @@ pub enum ToolbarEvent {
     Volume(f32),
     /// Search text changed.
     Search(String),
+    /// Collapse or expand the sidebar.
+    ToggleSidebar,
 }
 
 /// The toolbar view.
@@ -149,6 +153,23 @@ impl Toolbar {
             .ghost()
             .icon(Icon::new(icon))
             .disabled(!self.model.enabled)
+            .on_click(cx.listener(move |_, _, _, cx| cx.emit(event.clone())))
+    }
+
+    /// A toggle that works without an audio device, unlike the transport buttons.
+    #[allow(clippy::unused_self)] // keeps the method shape shared with `transport_button`
+    fn chrome_button(
+        &self,
+        id: &'static str,
+        icon: IconName,
+        event: ToolbarEvent,
+        selected: bool,
+        cx: &mut Context<Self>,
+    ) -> Button {
+        Button::new(id)
+            .ghost()
+            .icon(Icon::new(icon))
+            .selected(selected)
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(event.clone())))
     }
 
@@ -262,6 +283,13 @@ impl Render for Toolbar {
             .bg(cx.theme().title_bar)
             .border_b_1()
             .border_color(cx.theme().border)
+            .child(self.chrome_button(
+                "toggle-sidebar",
+                IconName::PanelLeft,
+                ToolbarEvent::ToggleSidebar,
+                false,
+                cx,
+            ))
             .child(
                 h_flex()
                     .gap_1()

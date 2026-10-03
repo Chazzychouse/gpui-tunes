@@ -17,6 +17,7 @@ pub enum SidebarEvent {
 /// The sidebar view.
 pub struct LibrarySidebar {
     active: Section,
+    collapsed: bool,
 }
 
 impl EventEmitter<SidebarEvent> for LibrarySidebar {}
@@ -26,7 +27,14 @@ impl LibrarySidebar {
     pub fn new(_cx: &mut Context<Self>) -> Self {
         Self {
             active: Section::Songs,
+            collapsed: false,
         }
+    }
+
+    /// Show the icon-only rail (`true`) or the full sidebar.
+    pub fn set_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        self.collapsed = collapsed;
+        cx.notify();
     }
 
     fn icon(section: Section) -> gpui_kit::assets::IconName {
@@ -54,6 +62,7 @@ impl Render for LibrarySidebar {
         });
 
         Sidebar::new("library-sidebar")
+            .collapsed(self.collapsed)
             .w_full()
             .h_full()
             .bg(cx.theme().sidebar)

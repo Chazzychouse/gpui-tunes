@@ -36,6 +36,7 @@ pub struct AppView {
     phase: Phase,
     filter: Filter,
     sidebar: Entity<LibrarySidebar>,
+    sidebar_collapsed: bool,
     browser: Entity<ColumnBrowser>,
     table: Entity<TableState<SongTableDelegate>>,
     queue: Queue,
@@ -136,6 +137,7 @@ impl AppView {
             phase: Phase::Scanning,
             filter: Filter::default(),
             sidebar,
+            sidebar_collapsed: false,
             browser,
             table,
             queue: Queue::new(),
@@ -209,6 +211,14 @@ impl AppView {
         cx.notify();
     }
 
+    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        let collapsed = self.sidebar_collapsed;
+        self.sidebar
+            .update(cx, |s, cx| s.set_collapsed(collapsed, cx));
+        cx.notify();
+    }
+
     fn on_toolbar_event(&mut self, ev: &ToolbarEvent, window: &mut Window, cx: &mut Context<Self>) {
         match ev {
             ToolbarEvent::Prev => self.step(false, window, cx),
@@ -224,6 +234,7 @@ impl AppView {
                     p.set_volume(*v);
                 }
             }
+            ToolbarEvent::ToggleSidebar => self.toggle_sidebar(cx),
             ToolbarEvent::Search(text) => {
                 self.filter.search.clone_from(text);
                 self.apply_query(window, cx);
@@ -366,28 +377,44 @@ impl AppView {
                 .child(format!("Looked in {}", path.display()))
                 .child("Set GPUI_TUNES_LIBRARY to point at your music")
                 .into_any_element(),
-            Phase::Ready(_) => h_resizable("main")
+            Phase::Ready(_) => self.render_main(cx),
+        }
+    }
+
+    /// Sidebar plus content. The collapsed rail sits outside the resizable
+    /// group so it keeps a fixed width.
+    fn render_main(&self, _cx: &mut Context<Self>) -> AnyElement {
+        let content = v_resizable("content")
+            .child(
+                resizable_panel()
+                    .size(px(200.))
+                    .size_range(px(120.)..px(400.))
+                    .child(self.browser.clone()),
+            )
+            .child(resizable_panel().child(DataTable::new(&self.table).stripe(true)));
+
+        if self.sidebar_collapsed {
+            h_flex()
+                .size_full()
+                .child(
+                    div()
+                        .w(px(48.))
+                        .h_full()
+                        .flex_shrink_0()
+                        .child(self.sidebar.clone()),
+                )
+                .child(div().flex_1().min_w_0().h_full().child(content))
+                .into_any_element()
+        } else {
+            h_resizable("main")
                 .child(
                     resizable_panel()
                         .size(px(180.))
                         .size_range(px(140.)..px(320.))
                         .child(self.sidebar.clone()),
                 )
-                .child(
-                    resizable_panel().child(
-                        v_resizable("content")
-                            .child(
-                                resizable_panel()
-                                    .size(px(200.))
-                                    .size_range(px(120.)..px(400.))
-                                    .child(self.browser.clone()),
-                            )
-                            .child(
-                                resizable_panel().child(DataTable::new(&self.table).stripe(true)),
-                            ),
-                    ),
-                )
-                .into_any_element(),
+                .child(resizable_panel().child(content))
+                .into_any_element()
         }
     }
 }
