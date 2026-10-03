@@ -8,6 +8,7 @@ use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::table::{DataTable, TableEvent, TableState};
 use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 #[allow(clippy::wildcard_imports)] // gpui_kit re-exports the gpui prelude
 use gpui_kit::*;
 use tunes_core::{
@@ -17,6 +18,7 @@ use tunes_core::{
 
 use crate::ui::art;
 use crate::ui::browser::{BrowserEvent, ColumnBrowser};
+use crate::ui::format::fmt_status;
 use crate::ui::sidebar::{LibrarySidebar, SidebarEvent};
 use crate::ui::song_table::SongTableDelegate;
 use crate::ui::toolbar::{Toolbar, ToolbarEvent, ToolbarModel};
@@ -45,6 +47,7 @@ pub struct AppView {
     /// Set after a decode error auto-advanced once; cleared by every
     /// `play_track`, so a run of broken files stops after one skip.
     auto_skipped: bool,
+    status_line: String,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
 }
@@ -142,6 +145,7 @@ impl AppView {
             art_cache: None,
             notice: None,
             auto_skipped: false,
+            status_line: String::new(),
             _subscriptions: subscriptions,
             _tasks: vec![scan_task, poll_task],
         }
@@ -161,9 +165,18 @@ impl AppView {
         };
         let sort = self.table.read(cx).delegate().sort;
         let ids = library.query(&self.filter, sort);
+        let total: Duration = ids
+            .iter()
+            .filter_map(|id| library.track(*id))
+            .map(|t| t.duration)
+            .sum();
+        self.status_line = fmt_status(ids.len(), total);
         self.queue.set_order(ids.clone());
         self.table.update(cx, |table, cx| {
             table.delegate_mut().rows = ids;
+            // Every caller of `apply_query` changed the filter, so a kept
+            // highlight would point at a different track.
+            table.clear_selection(cx);
             cx.notify();
         });
         cx.notify();
@@ -382,11 +395,28 @@ impl AppView {
 impl Render for AppView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = self.render_content(cx);
+        let ready = matches!(self.phase, Phase::Ready(_));
         v_flex()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.toolbar.clone())
             .child(div().flex_1().min_h_0().child(content))
+            .when(ready, |el| {
+                el.child(
+                    h_flex()
+                        .w_full()
+                        .h(px(24.))
+                        .flex_shrink_0()
+                        .justify_center()
+                        .items_center()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .bg(cx.theme().title_bar)
+                        .border_t_1()
+                        .border_color(cx.theme().border)
+                        .child(self.status_line.clone()),
+                )
+            })
     }
 }

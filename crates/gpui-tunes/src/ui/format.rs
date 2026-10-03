@@ -13,6 +13,23 @@ pub fn fmt_duration(d: Duration) -> String {
     }
 }
 
+/// Format a running total: `m:ss`, `h:mm:ss` from one hour, `d:hh:mm:ss` from one day.
+pub fn fmt_total(d: Duration) -> String {
+    let total = d.as_secs();
+    let (days, rest) = (total / 86_400, total % 86_400);
+    if days == 0 {
+        return fmt_duration(Duration::from_secs(rest));
+    }
+    let (h, m, s) = (rest / 3600, (rest % 3600) / 60, rest % 60);
+    format!("{days}:{h:02}:{m:02}:{s:02}")
+}
+
+/// Status-bar text for a list of `count` tracks lasting `total`.
+pub fn fmt_status(count: usize, total: Duration) -> String {
+    let noun = if count == 1 { "song" } else { "songs" };
+    format!("{count} {noun}, {}", fmt_total(total))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -22,6 +39,26 @@ mod tests {
         assert_eq!(fmt_duration(Duration::from_secs(0)), "0:00");
         assert_eq!(fmt_duration(Duration::from_secs(65)), "1:05");
         assert_eq!(fmt_duration(Duration::from_millis(185_900)), "3:05");
+    }
+
+    #[test]
+    fn total_switches_units_at_hour_and_day() {
+        assert_eq!(fmt_total(Duration::from_secs(59)), "0:59");
+        assert_eq!(fmt_total(Duration::from_secs(3_599)), "59:59");
+        assert_eq!(fmt_total(Duration::from_hours(1)), "1:00:00");
+        assert_eq!(fmt_total(Duration::from_secs(86_399)), "23:59:59");
+        assert_eq!(fmt_total(Duration::from_hours(24)), "1:00:00:00");
+        assert_eq!(fmt_total(Duration::from_secs(111_852)), "1:07:04:12");
+    }
+
+    #[test]
+    fn status_pluralises_songs() {
+        assert_eq!(fmt_status(0, Duration::ZERO), "0 songs, 0:00");
+        assert_eq!(fmt_status(1, Duration::from_secs(65)), "1 song, 1:05");
+        assert_eq!(
+            fmt_status(473, Duration::from_secs(111_852)),
+            "473 songs, 1:07:04:12"
+        );
     }
 
     #[test]
