@@ -70,6 +70,16 @@ pub struct Toolbar {
 impl EventEmitter<ToolbarEvent> for Toolbar {}
 
 impl Toolbar {
+    /// Move keyboard focus to the search field.
+    pub fn focus_search(&self, window: &mut Window, cx: &mut App) {
+        self.search.read(cx).focus_handle(cx).focus(window, cx);
+    }
+
+    /// Whether the search field has keyboard focus.
+    pub fn search_focused(&self, window: &Window, cx: &App) -> bool {
+        self.search.read(cx).focus_handle(cx).is_focused(window)
+    }
+
     /// Toolbar with empty now-playing state.
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let seek = cx.new(|_| {

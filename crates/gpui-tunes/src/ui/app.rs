@@ -23,6 +23,33 @@ use crate::ui::sidebar::{LibrarySidebar, SidebarEvent};
 use crate::ui::song_table::SongTableDelegate;
 use crate::ui::toolbar::{Toolbar, ToolbarEvent, ToolbarModel};
 
+actions!(
+    tunes,
+    [
+        PlayPause,
+        NextTrack,
+        PrevTrack,
+        FocusSearch,
+        ToggleSidebar,
+        PlaySelected
+    ]
+);
+
+const KEY_CONTEXT: &str = "Tunes";
+
+/// Register the app's keyboard shortcuts.
+pub fn bind_keys(cx: &mut App) {
+    let ctx = Some(KEY_CONTEXT);
+    cx.bind_keys([
+        KeyBinding::new("space", PlayPause, ctx),
+        KeyBinding::new("ctrl-right", NextTrack, ctx),
+        KeyBinding::new("ctrl-left", PrevTrack, ctx),
+        KeyBinding::new("ctrl-f", FocusSearch, ctx),
+        KeyBinding::new("ctrl-b", ToggleSidebar, ctx),
+        KeyBinding::new("enter", PlaySelected, ctx),
+    ]);
+}
+
 enum Phase {
     Scanning,
     Missing(PathBuf),
@@ -49,6 +76,7 @@ pub struct AppView {
     /// `play_track`, so a run of broken files stops after one skip.
     auto_skipped: bool,
     status_line: String,
+    focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
 }
@@ -131,6 +159,10 @@ impl AppView {
             .ok();
         });
 
+        let focus = cx.focus_handle();
+        // Without a focused element inside the root, actions never reach it.
+        focus.focus(window, cx);
+
         Self {
             root,
             player,
@@ -148,6 +180,7 @@ impl AppView {
             notice: None,
             auto_skipped: false,
             status_line: String::new(),
+            focus,
             _subscriptions: subscriptions,
             _tasks: vec![scan_task, poll_task],
         }
@@ -217,6 +250,33 @@ impl AppView {
         self.sidebar
             .update(cx, |s, cx| s.set_collapsed(collapsed, cx));
         cx.notify();
+    }
+
+    /// `space` and `enter` belong to the search field while it has focus.
+    fn typing(&self, window: &Window, cx: &App) -> bool {
+        self.toolbar.read(cx).search_focused(window, cx)
+    }
+
+    fn on_play_pause(&mut self, _: &PlayPause, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing(window, cx) {
+            cx.propagate();
+            return;
+        }
+        self.play_pause(window, cx);
+    }
+
+    fn on_play_selected(&mut self, _: &PlaySelected, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing(window, cx) {
+            cx.propagate();
+            return;
+        }
+        let table = self.table.read(cx);
+        let id = table
+            .selected_row()
+            .and_then(|row| table.delegate().track_at(row));
+        if let Some(id) = id {
+            self.play_track(id, window, cx);
+        }
     }
 
     fn on_toolbar_event(&mut self, ev: &ToolbarEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -425,6 +485,16 @@ impl Render for AppView {
         let ready = matches!(self.phase, Phase::Ready(_));
         v_flex()
             .size_full()
+            .key_context(KEY_CONTEXT)
+            .track_focus(&self.focus)
+            .on_action(cx.listener(Self::on_play_pause))
+            .on_action(cx.listener(Self::on_play_selected))
+            .on_action(cx.listener(|this, _: &NextTrack, window, cx| this.step(true, window, cx)))
+            .on_action(cx.listener(|this, _: &PrevTrack, window, cx| this.step(false, window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| this.toggle_sidebar(cx)))
+            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
+                this.toolbar.update(cx, |t, cx| t.focus_search(window, cx));
+            }))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child(self.toolbar.clone())

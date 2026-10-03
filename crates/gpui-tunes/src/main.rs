@@ -33,6 +33,7 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
             Theme::change(ThemeMode::Dark, None, cx);
+            crate::ui::app::bind_keys(cx);
 
             let options = WindowOptions {
                 titlebar: Some(TitlebarOptions {
