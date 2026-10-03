@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use gpui_kit::component::resizable::{h_resizable, resizable_panel, v_resizable};
 use gpui_kit::component::spinner::Spinner;
@@ -9,11 +10,16 @@ use gpui_kit::component::table::{DataTable, TableEvent, TableState};
 use gpui_kit::component::{ActiveTheme, h_flex, v_flex};
 #[allow(clippy::wildcard_imports)] // gpui_kit re-exports the gpui prelude
 use gpui_kit::*;
-use tunes_core::{Filter, Library, Player, PlayerError, Queue, ScanError, TrackId, scan};
+use tunes_core::{
+    Event, Filter, Library, PlaybackState, PlaybackStatus, Player, PlayerError, Queue, ScanError,
+    TrackId, scan,
+};
 
+use crate::ui::art;
 use crate::ui::browser::{BrowserEvent, ColumnBrowser};
 use crate::ui::sidebar::{LibrarySidebar, SidebarEvent};
 use crate::ui::song_table::SongTableDelegate;
+use crate::ui::toolbar::{Toolbar, ToolbarEvent, ToolbarModel};
 
 enum Phase {
     Scanning,
@@ -31,6 +37,14 @@ pub struct AppView {
     browser: Entity<ColumnBrowser>,
     table: Entity<TableState<SongTableDelegate>>,
     queue: Queue,
+    toolbar: Entity<Toolbar>,
+    status: PlaybackStatus,
+    now_playing: Option<TrackId>,
+    art_cache: Option<(TrackId, Arc<Image>)>,
+    notice: Option<(String, Instant)>,
+    /// Set after a decode error auto-advanced once; cleared by every
+    /// `play_track`, so a run of broken files stops after one skip.
+    auto_skipped: bool,
     _subscriptions: Vec<Subscription>,
     _tasks: Vec<Task<()>>,
 }
@@ -46,6 +60,7 @@ impl AppView {
         let sidebar = cx.new(LibrarySidebar::new);
         let browser = cx.new(|cx| ColumnBrowser::new(window, cx));
         let table = cx.new(|cx| TableState::new(SongTableDelegate::new(), window, cx));
+        let toolbar = cx.new(|cx| Toolbar::new(window, cx));
         let subscriptions = vec![
             cx.subscribe_in(
                 &sidebar,
@@ -81,7 +96,12 @@ impl AppView {
                     this.queue.set_order(rows.clone());
                 }
             }),
+            cx.subscribe_in(&toolbar, window, |this, _, ev, window, cx| {
+                this.on_toolbar_event(ev, window, cx);
+            }),
         ];
+
+        let poll_task = Self::spawn_poll(window, cx);
 
         let scan_root = root.clone();
         let scan_task = cx.spawn_in(window, async move |this, cx| {
@@ -116,8 +136,14 @@ impl AppView {
             browser,
             table,
             queue: Queue::new(),
+            toolbar,
+            status: PlaybackStatus::default(),
+            now_playing: None,
+            art_cache: None,
+            notice: None,
+            auto_skipped: false,
             _subscriptions: subscriptions,
-            _tasks: vec![scan_task],
+            _tasks: vec![scan_task, poll_task],
         }
     }
 
@@ -157,11 +183,141 @@ impl AppView {
         // `id` always comes from `rows`, which the table observer keeps in sync
         // with the queue, so it is always present.
         self.queue.jump_to(id);
+        self.now_playing = Some(id);
+        self.auto_skipped = false;
         self.table.update(cx, |table, cx| {
             table.delegate_mut().now_playing = Some(id);
             cx.notify();
         });
         cx.notify();
+    }
+
+    fn on_toolbar_event(&mut self, ev: &ToolbarEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match ev {
+            ToolbarEvent::Prev => self.step(false, window, cx),
+            ToolbarEvent::Next => self.step(true, window, cx),
+            ToolbarEvent::PlayPause => self.play_pause(window, cx),
+            ToolbarEvent::Seek(pos) => {
+                if let Ok(p) = &self.player {
+                    p.seek(*pos);
+                }
+            }
+            ToolbarEvent::Volume(v) => {
+                if let Ok(p) = &self.player {
+                    p.set_volume(*v);
+                }
+            }
+            ToolbarEvent::Search(text) => {
+                self.filter.search.clone_from(text);
+                self.apply_query(window, cx);
+            }
+        }
+    }
+
+    /// Every 250 ms, run `tick` until the view is dropped.
+    fn spawn_poll(window: &mut Window, cx: &mut Context<Self>) -> Task<()> {
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(250))
+                    .await;
+                if this.update_in(cx, Self::tick).is_err() {
+                    break;
+                }
+            }
+        })
+    }
+
+    /// Poll the player: refresh status, react to events, expire the notice.
+    fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Ok(player) = &self.player else {
+            // Keep pushing so the toolbar shows the "No audio output" notice.
+            self.push_toolbar_model(window, cx);
+            return;
+        };
+        self.status = player.status();
+        let mut events = Vec::new();
+        while let Some(event) = player.try_recv_event() {
+            events.push(event);
+        }
+        for event in events {
+            match event {
+                Event::TrackEnded => self.step(true, window, cx),
+                Event::Error(message) => {
+                    self.notice = Some((message, Instant::now()));
+                    // Skip past a broken file once; `play_track` clears the
+                    // flag, so re-arm it after stepping.
+                    if !self.auto_skipped {
+                        self.step(true, window, cx);
+                        self.auto_skipped = true;
+                    }
+                }
+            }
+        }
+        if self
+            .notice
+            .as_ref()
+            .is_some_and(|(_, at)| at.elapsed() > Duration::from_secs(5))
+        {
+            self.notice = None;
+        }
+        self.push_toolbar_model(window, cx);
+    }
+
+    fn step(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let next = if forward {
+            self.queue.next()
+        } else {
+            self.queue.prev()
+        };
+        if let Some(id) = next {
+            self.play_track(id, window, cx);
+        }
+    }
+
+    fn play_pause(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.status.state == PlaybackState::Stopped {
+            let id = self.queue.current().or_else(|| self.queue.next());
+            if let Some(id) = id {
+                self.play_track(id, window, cx);
+            }
+        } else if let Ok(p) = &self.player {
+            p.toggle();
+        }
+    }
+
+    fn push_toolbar_model(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mut model = ToolbarModel {
+            position: self.status.position,
+            duration: self.status.duration,
+            state: self.status.state,
+            enabled: self.player.is_ok(),
+            notice: self.notice.as_ref().map(|(m, _)| m.clone()),
+            ..ToolbarModel::default()
+        };
+        if self.player.is_err() {
+            model.notice = Some("No audio output".into());
+        }
+        if let (Phase::Ready(library), Some(id)) = (&self.phase, self.now_playing) {
+            if let Some(track) = library.track(id) {
+                model.title.clone_from(&track.title);
+                model.artist = format!("{} — {}", track.artist, track.album);
+            }
+            if self
+                .art_cache
+                .as_ref()
+                .is_none_or(|(cached, _)| *cached != id)
+            {
+                self.art_cache = library.cover_art(id).map(|bytes| (id, art::decode(&bytes)));
+            }
+            model.art = self
+                .art_cache
+                .as_ref()
+                .filter(|(cached, _)| *cached == id)
+                .map(|(_, img)| Arc::clone(img));
+        }
+        self.toolbar
+            .update(cx, |t, cx| t.set_model(model, window, cx));
     }
 
     fn render_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -219,6 +375,7 @@ impl Render for AppView {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(content)
+            .child(self.toolbar.clone())
+            .child(div().flex_1().min_h_0().child(content))
     }
 }

@@ -7,3 +7,4 @@ pub mod format;
 pub mod section;
 pub mod sidebar;
 pub mod song_table;
+pub mod toolbar;
