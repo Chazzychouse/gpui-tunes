@@ -107,7 +107,7 @@ impl TableDelegate for SongTableDelegate {
         col_ix: usize,
         sort: ColumnSort,
         _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
+        _: &mut Context<TableState<Self>>,
     ) {
         self.sort = match sort {
             ColumnSort::Default => Sort::default(),
@@ -123,7 +123,6 @@ impl TableDelegate for SongTableDelegate {
         if let Some(library) = &self.library {
             library.sort_ids(&mut self.rows, self.sort);
         }
-        cx.notify();
     }
 
     fn render_td(

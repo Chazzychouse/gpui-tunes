@@ -73,6 +73,14 @@ impl AppView {
                     }
                 }
             }),
+            // Header sorts reorder `rows` inside the table; mirror that order
+            // into the queue so next/previous follow what the user sees.
+            cx.observe(&table, |this, table, cx| {
+                let rows = &table.read(cx).delegate().rows;
+                if rows.as_slice() != this.queue.order() {
+                    this.queue.set_order(rows.clone());
+                }
+            }),
         ];
 
         let scan_root = root.clone();
@@ -130,7 +138,6 @@ impl AppView {
         self.queue.set_order(ids.clone());
         self.table.update(cx, |table, cx| {
             table.delegate_mut().rows = ids;
-            table.refresh(cx);
             cx.notify();
         });
         cx.notify();
@@ -147,10 +154,11 @@ impl AppView {
         if let Ok(player) = &self.player {
             player.play(&track.path);
         }
+        // `id` always comes from `rows`, which the table observer keeps in sync
+        // with the queue, so it is always present.
         self.queue.jump_to(id);
         self.table.update(cx, |table, cx| {
             table.delegate_mut().now_playing = Some(id);
-            table.refresh(cx);
             cx.notify();
         });
         cx.notify();
